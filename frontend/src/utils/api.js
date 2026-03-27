@@ -6,7 +6,7 @@ import axios from "axios";
 // });
 
 const api = axios.create({
-    baseURL: 'http://localhost:5001/api' 
+    baseURL: 'https://full-stack-aimail.onrender.com/api' 
 });
 
 api.interceptors.request.use((config) => {
