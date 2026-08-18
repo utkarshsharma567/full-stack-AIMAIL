@@ -140,26 +140,37 @@ Return ONLY valid JSON.`;
 
 
 const fullPrompt = `${systemPrompt} User REQUEST: "${prompt.trim()}" Generate STRONG cold email even if prompt is short. Make smart assumptions. Return ONLY valid JSON: {"subject": "...", "emailBody": "...", "linkedInDM": "...", "followUpEmail": "..."}`;
-       const aiResponse = await axios.post(
+      const aiResponse = await axios.post(
   'https://api.groq.com/openai/v1/chat/completions',
   {
     model: 'openai/gpt-oss-120b',
+
     messages: [
       {
+        role: "system",
+        content: systemPrompt
+      },
+      {
         role: "user",
-        content: fullPrompt
+        content: prompt.trim()
       }
     ],
+
     temperature: 0.7,
-    max_tokens: 1024
+    max_tokens: 1024,
+
+    response_format: {
+      type: "json_object"
+    }
   },
   {
     headers: {
       Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-      'Content-Type': 'application/json'
+      "Content-Type": "application/json"
     }
   }
 );
+   
 
  if (!aiResponse.data.choices || !aiResponse.data.choices[0] || !aiResponse.data.choices[0].message) {
       throw new Error('Invalid response from Groq API');
