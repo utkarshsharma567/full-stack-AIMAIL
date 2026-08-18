@@ -1,89 +1,108 @@
 require("dotenv").config();
 
+const axios = require("axios");
+const EmailHistory = require("../models/emailHistory.model");
 
-const axios = require('axios');
-const EmailHistory = require('../models/emailHistory.model')
-
-//generate email using ai groq api
-exports.generateEmail = async (req, resp) => {
+// Generate email using Groq AI
+exports.generateEmail = async (req, res) => {
   const { prompt } = req.body;
 
   try {
-    // Validate prompt
+    // -----------------------------
+    // 1. Validate prompt
+    // -----------------------------
     if (!prompt) {
-      return resp.status(400).json({
+      return res.status(400).json({
         message: "Prompt is required",
       });
     }
 
     if (prompt.trim().length === 0) {
-      return resp.status(400).json({
+      return res.status(400).json({
         message: "Prompt cannot be empty",
       });
     }
 
     if (prompt.length > 2000) {
-      return resp.status(400).json({
+      return res.status(400).json({
         message: "Prompt cannot exceed 2000 characters",
       });
     }
 
-    // System prompt
+    // -----------------------------
+    // 2. Check Groq API key
+    // -----------------------------
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(500).json({
+        message: "GROQ_API_KEY is not configured on the server",
+      });
+    }
+
+    // -----------------------------
+    // 3. System prompt
+    // -----------------------------
     const systemPrompt = `
 You are an expert job outreach strategist.
 
-Generate a professional and high-converting cold email for a recruiter.
+Generate a professional cold email to a recruiter based on the user's request.
 
-Make reasonable professional assumptions if the user's request is short.
-Do not ask questions.
-Do not ask for clarification.
+Make reasonable assumptions if the request is very short.
 
-The candidate:
-- Has 2+ years of software engineering experience
-- Is strong in DSA and system design
-- Has backend API experience
-- Has worked on scalable production systems
-- Has contributed to production-level features
-- Is looking for Software Engineer opportunities
+Candidate assumptions:
+- 2+ years of software engineering experience
+- Strong DSA and system design skills
+- Backend API and scalable system experience
+- Production-level development experience
+- Looking for Software Engineer opportunities
 
-Writing rules:
+Generate four things:
+
+1. subject
+2. emailBody
+3. linkedInDM
+4. followUpEmail
+
+Rules:
+
+SUBJECT:
+- 6 to 9 words
 - Professional
 - Confident
-- Concise
+- Avoid "Quick question"
+- Avoid "Looking for opportunity"
+- Avoid "Job application"
+
+EMAIL BODY:
+- 60 to 90 words
+- Professional
+- Personalized
+- Mention candidate value
+- Include a clear call to action
 - No emojis
 - No hype
 - No markdown
 
-Subject:
-- 6-9 words
-- Professional
-- Highlight candidate value
-
-Email body:
-- 60-90 words
-- Personalized observation
-- Mention a relevant hiring/scaling challenge
-- Mention candidate experience
-- Mention potential value
-- Clear call to action
-- Professional sign-off
-
-LinkedIn DM:
-- 30-50 words
+LINKEDIN DM:
+- 30 to 50 words
 - Conversational
-- Observation + value + soft ask
+- Professional
+- Include a soft call to action
 
-Follow-up email:
-- 50-80 words
-- New angle
-- Professional urgency
-- Clear call to action
+FOLLOW UP EMAIL:
+- 50 to 80 words
+- Professional
+- Add a new angle
+- Include a clear call to action
 
-User request:
-${prompt.trim()}
+IMPORTANT:
+Return ONLY the requested JSON object.
+Do not add explanations.
+Do not add markdown.
 `;
 
-    // Groq API request
+    // -----------------------------
+    // 4. Groq API request
+    // -----------------------------
     const aiResponse = await axios.post(
       "https://api.groq.com/openai/v1/chat/completions",
       {
@@ -100,10 +119,10 @@ ${prompt.trim()}
           },
         ],
 
-        temperature: 0.5,
-        max_tokens: 1024,
+        temperature: 0.6,
 
-        // Strict JSON Schema
+        max_completion_tokens: 1200,
+
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -111,30 +130,39 @@ ${prompt.trim()}
             strict: true,
             schema: {
               type: "object",
+
               properties: {
                 subject: {
                   type: "string",
                 },
+
                 emailBody: {
                   type: "string",
                 },
+
                 linkedInDM: {
                   type: "string",
                 },
+
                 followUpEmail: {
                   type: "string",
                 },
               },
+
               required: [
                 "subject",
                 "emailBody",
                 "linkedInDM",
                 "followUpEmail",
               ],
+
               additionalProperties: false,
             },
           },
         },
+
+        // GPT-OSS reasoning ko low rakhenge
+        reasoning_effort: "low",
       },
       {
         headers: {
@@ -144,36 +172,43 @@ ${prompt.trim()}
       }
     );
 
-    // Check Groq response
+    // -----------------------------
+    // 5. Check Groq response
+    // -----------------------------
     if (
+      !aiResponse.data ||
       !aiResponse.data.choices ||
       !aiResponse.data.choices[0] ||
       !aiResponse.data.choices[0].message
     ) {
-      throw new Error("Invalid response from Groq API");
+      throw new Error("Invalid response received from Groq API");
     }
 
     const generatedText =
       aiResponse.data.choices[0].message.content;
 
-    console.log("Groq Response:", generatedText);
+    console.log("Groq response:", generatedText);
 
-    // Parse JSON
+    // -----------------------------
+    // 6. Parse JSON
+    // -----------------------------
     let parsedResponse;
 
     try {
       parsedResponse = JSON.parse(generatedText);
     } catch (parseError) {
-      console.error("JSON parse error:", parseError);
-      console.error("Generated text:", generatedText);
+      console.error("JSON Parse Error:", parseError);
+      console.error("Generated Text:", generatedText);
 
-      return resp.status(500).json({
+      return res.status(500).json({
         message: "Failed to parse AI response",
-        error: "AI generated invalid JSON",
+        error: "AI returned invalid JSON",
       });
     }
 
-    // Prepare email data
+    // -----------------------------
+    // 7. Prepare email data
+    // -----------------------------
     const emailData = {
       subject: parsedResponse.subject || "New Opportunity",
       emailBody: parsedResponse.emailBody || "",
@@ -181,25 +216,40 @@ ${prompt.trim()}
       followUpEmail: parsedResponse.followUpEmail || "",
     };
 
-    // Validate
-    if (!emailData.subject || !emailData.emailBody) {
-      return resp.status(500).json({
+    // -----------------------------
+    // 8. Validate AI output
+    // -----------------------------
+    if (
+      !emailData.subject ||
+      !emailData.emailBody ||
+      !emailData.linkedInDM ||
+      !emailData.followUpEmail
+    ) {
+      return res.status(500).json({
         message: "AI generated incomplete email data",
       });
     }
 
-    // Save history
+    // -----------------------------
+    // 9. Save history
+    // -----------------------------
     const historyEntry = await EmailHistory.create({
       userId: req.user._id,
       prompt: prompt.trim(),
+
       subject: emailData.subject,
+
       emailBody: emailData.emailBody,
+
       linkedInDM: emailData.linkedInDM,
+
       followUpEmail: emailData.followUpEmail,
     });
 
-    return resp.status(200).json(historyEntry);
-
+    // -----------------------------
+    // 10. Send response
+    // -----------------------------
+    return res.status(200).json(historyEntry);
   } catch (error) {
     console.error(
       "AI Generation Error:",
@@ -208,31 +258,49 @@ ${prompt.trim()}
 
     // Rate limit
     if (error.response?.status === 429) {
-      return resp.status(429).json({
+      return res.status(429).json({
         message:
-          "Too many requests. Please wait a moment before trying again.",
+          "Too many requests. Please wait a moment and try again.",
         error: "Rate limit exceeded",
       });
     }
 
-    return resp.status(500).json({
+    // Groq API error
+    if (error.response?.data?.error) {
+      return res.status(500).json({
+        message: "Groq API error",
+        error: error.response.data.error.message,
+        code: error.response.data.error.code,
+      });
+    }
+
+    return res.status(500).json({
       message: "Failed to generate email",
-      error:
-        error.response?.data?.error?.message ||
-        error.message,
+      error: error.message,
     });
   }
 };
 
 
+// ------------------------------------
+// Get email history
+// ------------------------------------
+exports.getHistory = async (req, res) => {
+  try {
+    const history = await EmailHistory.find({
+      userId: req.user._id,
+    }).sort({
+      createdAt: -1,
+    });
 
-// fetch all email 
-exports.getHistory = async (req, resp) => {
-  try {//user ki id sai uski history lana
-    const history = await EmailHistory.find({ userId: req.user._id }).sort({ createdAt: -1 });
-    resp.status(200).json(history);
+    return res.status(200).json(history);
   } catch (error) {
-    resp.status(500).json({ message: 'Failed to fetch history',error:error.message });
+    console.error("History Error:", error);
+
+    return res.status(500).json({
+      message: "Failed to fetch history",
+      error: error.message,
+    });
   }
 };
 
